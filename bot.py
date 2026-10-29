@@ -5,7 +5,7 @@ import aiohttp
 import aiosqlite
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -16,8 +16,8 @@ BOT_TOKEN = "9026120942:AAFwZJ_q-fBM2g_KjTykECNkKmPA0eI6F2c"
 ADMIN_ID = 7266067201
 DB_PATH = "bot_database.db"
 
-# আপাতত ক্র্যাশ ঠেকাতে স্ট্যান্ডার্ড ইমোজি দেওয়া হলো।
-# পরবর্তীতে প্রিমিয়াম আইডি পেলে: '<tg-emoji id="ID_HERE">🟢</tg-emoji>' ফরম্যাটে বসাবে
+# বর্তমানে স্ট্যান্ডার্ড ইমোজি ব্যবহার করা হয়েছে যাতে ক্র্যাশ না করে।
+# পরবর্তীতে প্রিমিয়াম আইডি পেলে: '<tg-emoji id="YOUR_ID">🟢</tg-emoji>' ফরম্যাটে বসাবে
 EMOJI = {
     "key": "🔑",
     "tg": "✈️",
@@ -29,20 +29,15 @@ EMOJI = {
     "admin": "👑",
 }
 
-# --- Dummy Web Server (Render Port Binding) ---
+# --- Render Port Binding Web Server ---
 async def handle_ping(request):
-    return web.Response(text="Bot is running live!")
+    return web.Response(text="Bot is running live 24/7 on Render!")
 
-async def start_dummy_server():
+def create_web_app():
     app = web.Application()
     app.router.add_get("/", handle_ping)
     app.router.add_get("/health", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logging.info(f"Render dummy web server started on port {port}")
+    return app
 
 # --- FSM States ---
 class Form(StatesGroup):
@@ -103,7 +98,7 @@ class TigerSMS:
             except Exception:
                 return None
 
-# --- Database ---
+# --- Database Operations ---
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -162,7 +157,7 @@ def main_menu_keyboard(has_key: bool, is_admin: bool):
     builder.adjust(1)
     return builder.as_markup()
 
-# --- Handlers ---
+# --- Dispatcher & Bot ---
 dp = Dispatcher(storage=MemoryStorage())
 bot = Bot(token=BOT_TOKEN)
 
@@ -180,7 +175,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             "ডাটাবেসে কোনো কান্ট্রি নেই। প্রথমে কান্ট্রি যোগ করুন।"
         )
         builder = InlineKeyboardBuilder()
-        builder.button(text="➕ Add Country", callback_data="admin_add_country")
+        builder.button(text="➕ Add Country Now", callback_data="admin_add_country")
         builder.button(text="🏠 Main Menu", callback_data="main_menu")
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         return
@@ -218,7 +213,7 @@ async def back_main_menu(call: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
 
-# --- API Key হ্যান্ডলিং ---
+# --- API Key Setup ---
 @dp.callback_query(F.data == "change_api_key")
 async def ask_api_key(call: types.CallbackQuery, state: FSMContext):
     await call.message.answer(
@@ -250,7 +245,7 @@ async def save_api_key(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-# --- ব্যালেন্স চেক ---
+# --- Balance Check ---
 @dp.callback_query(F.data == "check_balance")
 async def view_balance(call: types.CallbackQuery):
     api_key = await get_user_key(call.from_user.id)
@@ -265,7 +260,7 @@ async def view_balance(call: types.CallbackQuery):
     )
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-# --- নম্বর কেনা ---
+# --- Buy Telegram Number ---
 @dp.callback_query(F.data == "buy_menu")
 async def show_countries(call: types.CallbackQuery):
     countries = await get_all_countries()
@@ -403,3 +398,88 @@ async def process_cid(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("দয়া করে সংখ্যায় ID দিন:")
         return
+    await state.update_data(cid=int(message.text))
+    await message.answer("এবার দেশের <b>নাম</b> লিখুন (যেমন: Russia):", parse_mode="HTML")
+    await state.set_state(Form.admin_add_country_name)
+
+@dp.message(Form.admin_add_country_name)
+async def process_cname(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    cid = data["cid"]
+    cname = message.text.strip()
+    await add_country(cid, cname)
+    await state.clear()
+    await message.answer(
+        f"{EMOJI['success']} <b>[🟢 ADDED]</b> {cname} (ID: {cid}) যুক্ত হয়েছে!",
+        reply_markup=main_menu_keyboard(True, True),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "admin_rem_country")
+async def list_remove_country(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    countries = await get_all_countries()
+    builder = InlineKeyboardBuilder()
+    for cid, name in countries:
+        builder.button(text=f"🗑 {name}", callback_data=f"del_c_{cid}")
+    builder.button(text="🔙 Back", callback_data="admin_panel")
+    builder.adjust(2)
+    await call.message.edit_text("যেটি ডিলিট করতে চান সিলেক্ট করুন:", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("del_c_"))
+async def execute_remove_country(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    cid = int(call.data.split("_")[2])
+    await remove_country(cid)
+    await call.answer("কান্ট্রি রিমুভ হয়েছে!", show_alert=True)
+    await open_admin(call)
+
+# --- Emoji Catch Handler ---
+@dp.message(F.text)
+async def catch_custom_emoji(message: types.Message):
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == "custom_emoji":
+                await message.reply(
+                    f"✨ <b>Custom Emoji Found!</b>\n\n"
+                    f"ID: <code>{entity.custom_emoji_id}</code>\n"
+                    f"Code: <code>&lt;tg-emoji id=\"{entity.custom_emoji_id}\"&gt;⭐&lt;/tg-emoji&gt;</code>",
+                    parse_mode="HTML"
+                )
+                return
+
+# --- Main Entrypoint ---
+async def main():
+    await init_db()
+    logging.info("Database initialized successfully.")
+
+    # Render Port Binding
+    port = int(os.environ.get("PORT", 10000))
+    app = create_web_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Render web server listening on port {port}")
+
+    # Start Polling with drop_pending_updates to clear previous crash logs
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("Starting Telegram Bot Polling...")
+        await dp.start_polling(bot)
+    except Exception as e:
+        logging.error(f"Bot crashed: {e}", exc_info=True)
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped.")
+    except Exception as e:
+        print(f"FATAL ERROR: {e}")
