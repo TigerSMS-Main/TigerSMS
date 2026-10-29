@@ -17,9 +17,14 @@ BOT_TOKEN = "9026120942:AAFwZJ_q-fBM2g_KjTykECNkKmPA0eI6F2c"
 ADMIN_ID = 7266067201
 DB_PATH = "bot_database.db"
 
+# Fixed Target: Brazil Telegram
+FIXED_COUNTRY_ID = 7
+FIXED_COUNTRY_NAME = "Brazil"
+FIXED_SERVICE = "tg"
+
 # --- Web Server for Render 24/7 Hosting ---
 async def handle_ping(request):
-    return web.Response(text="Tiger SMS Bot running live 24/7.")
+    return web.Response(text="Brazil TG SMS Bot is live 24/7.")
 
 def create_web_app():
     app = web.Application()
@@ -31,8 +36,6 @@ def create_web_app():
 class Form(StatesGroup):
     waiting_for_api_key = State()
     waiting_for_amount = State()
-    admin_add_country_id = State()
-    admin_add_country_name = State()
     admin_set_max_price = State()
     admin_set_bad_prefix = State()
 
@@ -52,23 +55,39 @@ class TigerSMS:
                 return None
 
     @staticmethod
-    async def buy_number(api_key: str, country_code: int, max_price: float = None):
+    async def buy_number(api_key: str, max_price: float = None):
         params = {
             "action": "getNumberV2",
             "api_key": api_key,
-            "service": "tg",
-            "country": country_code
+            "service": FIXED_SERVICE,
+            "country": FIXED_COUNTRY_ID
         }
-        if max_price and max_price > 0:
-            params["maxPrice"] = max_price
+        
+        # Max price threshold formatting
+        if max_price is not None and max_price > 0:
+            params["maxPrice"] = f"{float(max_price):.4f}"
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(TigerSMS.BASE_URL, params=params, timeout=15) as resp:
-                    data = await resp.json()
-                    if "activationId" in data:
-                        return True, data
-                    return False, data.get("message", "OUT_OF_STOCK")
+                    # Tiger SMS text ba json duto-i return korte pare
+                    text_resp = await resp.text()
+                    try:
+                        data = await resp.json()
+                        if "activationId" in data:
+                            return True, data
+                        err_msg = data.get("message") or data.get("status") or str(data)
+                        return False, err_msg
+                    except Exception:
+                        # V1 Fallback parse (ACCESS_NUMBER:id:number)
+                        if text_resp.startswith("ACCESS_NUMBER"):
+                            parts = text_resp.split(":")
+                            return True, {
+                                "activationId": parts[1],
+                                "phoneNumber": parts[2],
+                                "activationCost": "N/A"
+                            }
+                        return False, text_resp.strip()
             except Exception as e:
                 return False, str(e)
 
@@ -102,12 +121,6 @@ async def init_db():
             )
         """)
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS countries (
-                country_id INTEGER PRIMARY KEY,
-                name TEXT
-            )
-        """)
-        await db.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -126,21 +139,6 @@ async def set_user_key(user_id: int, api_key: str):
         await db.execute("INSERT OR REPLACE INTO users (user_id, api_key) VALUES (?, ?)", (user_id, api_key))
         await db.commit()
 
-async def get_all_countries():
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT country_id, name FROM countries") as cursor:
-            return await cursor.fetchall()
-
-async def add_country(country_id: int, name: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR REPLACE INTO countries (country_id, name) VALUES (?, ?)", (country_id, name))
-        await db.commit()
-
-async def remove_country(country_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM countries WHERE country_id = ?", (country_id,))
-        await db.commit()
-
 async def get_setting(key: str, default: str = ""):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cursor:
@@ -152,7 +150,7 @@ async def set_setting(key: str, value: str):
         await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
 
-# --- Main Interface Keyboard (Native Colored Buttons) ---
+# --- Main Navigation Keyboard ---
 def get_main_reply_keyboard(is_admin: bool = False):
     builder = ReplyKeyboardBuilder()
     builder.add(
@@ -180,28 +178,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         user_id = message.from_user.id
         api_key = await get_user_key(user_id)
-        countries = await get_all_countries()
-
-        if user_id == ADMIN_ID and not countries:
-            text = (
-                "<b>Welcome Administrator</b>\n\n"
-                "Status: No active countries available in the database.\n"
-                "Select Admin Console below or send /admin to configure countries."
-            )
-            await message.answer(text, reply_markup=get_main_reply_keyboard(True), parse_mode="HTML")
-            return
 
         if not api_key:
             text = (
                 "<b>Welcome to Tiger SMS Service</b>\n\n"
+                "Target: <b>Brazil Telegram</b>\n"
                 "Status: No API Key linked.\n"
                 "Please click <b>Change API Key</b> below to connect your account."
             )
         else:
             text = (
                 "<b>Tiger SMS Telegram Terminal</b>\n\n"
+                "Service: <b>Brazil Telegram (+55)</b>\n"
                 "Status: System Active & Ready\n"
-                "Choose an option from the menu below:"
+                "Click <b>Buy Numbers</b> below to purchase."
             )
 
         await message.answer(
@@ -210,7 +200,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
 
-# --- Admin Panel ---
+# --- Admin Panel (/admin) ---
 @dp.message(Command("admin"))
 @dp.message(F.text == "Admin Console")
 async def cmd_admin(message: types.Message, state: FSMContext):
@@ -219,22 +209,18 @@ async def cmd_admin(message: types.Message, state: FSMContext):
         return
 
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-        countries = await get_all_countries()
         max_p = await get_setting("max_price", "None")
         bad_pref = await get_setting("bad_prefix", "None")
 
         builder = InlineKeyboardBuilder()
-        builder.button(text="Add Country", callback_data="admin_add_country")
-        if countries:
-            builder.button(text="Remove Country", callback_data="admin_rem_country")
         builder.button(text="Set Max Price Limit", callback_data="admin_set_max_p")
         builder.button(text="Set Blocked Prefixes", callback_data="admin_set_bad_p")
-        builder.button(text="Back to Main Menu", callback_data="admin_close")
+        builder.button(text="Close Console", callback_data="admin_close")
         builder.adjust(1)
 
         text = (
             "<b>Admin Configuration Center</b>\n\n"
-            f"Configured Countries: <code>{len(countries)}</code>\n"
+            "Active Service: <b>Brazil Telegram</b>\n"
             f"Max Price Cap: <code>${max_p}</code>\n"
             f"Blocked Prefixes: <code>{bad_pref}</code>"
         )
@@ -250,7 +236,7 @@ async def set_max_p_prompt(call: types.CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.button(text="Back", callback_data="admin_back")
     await call.message.edit_text(
-        "Enter maximum price threshold in USD (e.g. <code>0.30</code>) or send <code>0</code> to disable:",
+        "Enter maximum price threshold in USD (e.g. <code>0.35</code>) or send <code>0</code> to disable guard:",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -294,22 +280,18 @@ async def process_bad_prefix(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_back")
 async def admin_back_btn(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    countries = await get_all_countries()
     max_p = await get_setting("max_price", "None")
     bad_pref = await get_setting("bad_prefix", "None")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="Add Country", callback_data="admin_add_country")
-    if countries:
-        builder.button(text="Remove Country", callback_data="admin_rem_country")
     builder.button(text="Set Max Price Limit", callback_data="admin_set_max_p")
     builder.button(text="Set Blocked Prefixes", callback_data="admin_set_bad_p")
-    builder.button(text="Back to Main Menu", callback_data="admin_close")
+    builder.button(text="Close Console", callback_data="admin_close")
     builder.adjust(1)
 
     await call.message.edit_text(
-        f"<b>Admin Configuration Center</b>\n\n"
-        f"Configured Countries: <code>{len(countries)}</code>\n"
+        "<b>Admin Configuration Center</b>\n\n"
+        "Active Service: <b>Brazil Telegram</b>\n"
         f"Max Price Cap: <code>${max_p}</code>\n"
         f"Blocked Prefixes: <code>{bad_pref}</code>",
         reply_markup=builder.as_markup(),
@@ -365,76 +347,35 @@ async def view_profile_msg(message: types.Message):
         )
         await message.answer(text, parse_mode="HTML")
 
-# --- Number Ordering: Fast Country Selection ---
+# --- Direct Buy Flow: Brazil Telegram Only ---
 @dp.message(F.text == "Buy Numbers")
-async def show_countries_list(message: types.Message):
+async def direct_ask_quantity(message: types.Message, state: FSMContext):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         api_key = await get_user_key(message.from_user.id)
         if not api_key:
             await message.answer("Please configure your API Key first.")
             return
 
-        countries = await get_all_countries()
-        if not countries:
-            await message.answer("No countries currently configured.")
-            return
-
         builder = InlineKeyboardBuilder()
-        for cid, name in countries:
-            builder.button(text=name, callback_data=f"sel_c_{cid}_{name}")
-        
-        builder.button(text="Back", callback_data="order_close")
-        builder.adjust(2)
+        builder.button(text="1 Number", callback_data="qty_1")
+        builder.button(text="2 Numbers", callback_data="qty_2")
+        builder.button(text="5 Numbers", callback_data="qty_5")
+        builder.button(text="10 Numbers", callback_data="qty_10")
+        builder.button(text="Cancel", callback_data="order_close")
+        builder.adjust(2, 2, 1)
 
         await message.answer(
-            "<b>Select Country:</b>",
+            "Service: <b>Brazil Telegram (+55)</b>\n\n"
+            "Select quantity to purchase or enter custom amount (1-10):",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
+        await state.set_state(Form.waiting_for_amount)
 
 @dp.callback_query(F.data == "order_close")
-async def close_order_menu(call: types.CallbackQuery):
-    await call.message.delete()
-
-@dp.callback_query(F.data.startswith("sel_c_"))
-async def ask_quantity(call: types.CallbackQuery, state: FSMContext):
-    _, _, cid, cname = call.data.split("_")
-    await state.update_data(selected_cid=int(cid), selected_cname=cname)
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text="1 Number", callback_data="qty_1")
-    builder.button(text="2 Numbers", callback_data="qty_2")
-    builder.button(text="5 Numbers", callback_data="qty_5")
-    builder.button(text="10 Numbers", callback_data="qty_10")
-    builder.button(text="Back", callback_data="back_to_country_list")
-    builder.adjust(2, 2, 1)
-
-    await call.message.edit_text(
-        f"Selected Country: <b>{cname}</b>\n\n"
-        "Select number of allocations or enter quantity (1-10):",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
-    await state.set_state(Form.waiting_for_amount)
-    await call.answer()
-
-@dp.callback_query(F.data == "back_to_country_list")
-async def back_to_country_list_btn(call: types.CallbackQuery, state: FSMContext):
+async def close_order_menu(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    countries = await get_all_countries()
-
-    builder = InlineKeyboardBuilder()
-    for cid, name in countries:
-        builder.button(text=name, callback_data=f"sel_c_{cid}_{name}")
-    
-    builder.button(text="Back", callback_data="order_close")
-    builder.adjust(2)
-
-    await call.message.edit_text(
-        "<b>Select Country:</b>",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    await call.message.delete()
 
 @dp.callback_query(Form.waiting_for_amount, F.data.startswith("qty_"))
 async def process_qty_btn(call: types.CallbackQuery, state: FSMContext):
@@ -453,26 +394,25 @@ async def process_qty_txt(message: types.Message, state: FSMContext):
         return
     await execute_bulk_buy(message, message.from_user.id, state, amount)
 
-# --- Purchase Allocation & Auto-Refund ---
+# --- Execution, Blacklist Check & Tracking ---
 async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMContext, amount: int):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-        data = await state.get_data()
-        cid = data["selected_cid"]
-        cname = data["selected_cname"]
         await state.clear()
 
         api_key = await get_user_key(user_id)
         max_p_str = await get_setting("max_price", "0")
-        max_price = float(max_p_str) if max_p_str != "0" else None
+        max_price = float(max_p_str) if max_p_str not in ("0", "", "None") else None
 
         bad_p_str = await get_setting("bad_prefix", "None")
-        bad_prefixes = [p.strip() for p in bad_p_str.split(",") if p.strip()] if bad_p_str != "None" else []
+        bad_prefixes = [p.strip() for p in bad_p_str.split(",") if p.strip()] if bad_pref_active(bad_p_str) else []
 
-        status_msg = await message.answer(f"Processing order for {amount}x number(s) in {cname}...", parse_mode="HTML")
+        status_msg = await message.answer(f"Processing order for {amount}x Brazil Telegram number(s)...", parse_mode="HTML")
 
         purchased = []
+        last_error = ""
+
         for _ in range(amount):
-            success, res = await TigerSMS.buy_number(api_key, cid, max_price)
+            success, res = await TigerSMS.buy_number(api_key, max_price)
             if success:
                 phone = str(res.get("phoneNumber", ""))
                 act_id = str(res.get("activationId", ""))
@@ -480,20 +420,25 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
                 # Check Prefix Blacklist
                 is_bad = any(phone.startswith(bad_p.lstrip("+")) for bad_p in bad_prefixes)
                 if is_bad:
+                    # Cancel bad prefix instantly
                     await TigerSMS.set_status(api_key, act_id, 8)
-                    retry_success, retry_res = await TigerSMS.buy_number(api_key, cid, max_price)
+                    # Retry allocation once
+                    retry_success, retry_res = await TigerSMS.buy_number(api_key, max_price)
                     if retry_success:
                         purchased.append(retry_res)
                 else:
                     purchased.append(res)
-            await asyncio.sleep(0.1)
+            else:
+                last_error = str(res)
+            await asyncio.sleep(0.15)
 
         if not purchased:
-            await status_msg.edit_text("Purchase Failed: Numbers out of stock or price exceeded maximum threshold.")
+            await status_msg.edit_text(f"Purchase Failed: <code>{last_error or 'Out of stock or check max price'}</code>", parse_mode="HTML")
             return
 
         await status_msg.edit_text(
-            f"Successfully allocated {len(purchased)} number(s).\nTracking SMS status below (20 min window with instant refund):"
+            f"Successfully allocated {len(purchased)} Brazil Telegram number(s).\n"
+            "SMS codes will be tracked below (20 min window with instant refund):"
         )
 
         for item in purchased:
@@ -505,14 +450,17 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
             sub_msg = await message.answer(
                 f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: {cname}\n"
+                f"Country: Brazil\n"
                 f"Rate: ${cost}",
                 parse_mode="HTML"
             )
-            asyncio.create_task(poll_sms_loop(sub_msg, api_key, act_id, phone, cost, cname, can_multi))
+            asyncio.create_task(poll_sms_loop(sub_msg, api_key, act_id, phone, cost, can_multi))
 
-async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: str, cost, country_name: str, can_multi: bool):
-    # 20 minutes: 240 polls * 5 sec = 1200 sec
+def bad_pref_active(s: str) -> bool:
+    return s not in ("None", "", "clear", "none")
+
+async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: str, cost, can_multi: bool):
+    # 20 minutes window: 240 polls * 5 sec = 1200 sec
     for _ in range(240):
         await asyncio.sleep(5)
         status_data = await TigerSMS.get_status(api_key, act_id)
@@ -532,7 +480,7 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
                 f"<b>SMS Code Received</b>\n\n"
                 f"Phone: <code>+{phone}</code>\n"
                 f"Code: <code>{code}</code>\n"
-                f"Country: {country_name}\n"
+                f"Country: Brazil\n"
                 f"Rate: ${cost}",
                 reply_markup=multi_btn.as_markup(),
                 parse_mode="HTML"
@@ -543,7 +491,7 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
             await msg.edit_text(
                 f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: {country_name}\n"
+                f"Country: Brazil\n"
                 f"ID: <code>{act_id}</code>\n"
                 f"Rate: ${cost}\n\n"
                 "Auto-refreshing status...",
@@ -553,7 +501,7 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
         except Exception:
             pass
 
-    # 20 minute timeout refund
+    # 20 minute auto-cancel and refund
     await TigerSMS.set_status(api_key, act_id, 8)
     await msg.edit_text(f"Activation Expired. Phone +{phone} was auto-refunded to balance.")
 
@@ -578,64 +526,6 @@ async def cancel_activation(call: types.CallbackQuery):
     api_key = await get_user_key(call.from_user.id)
     await TigerSMS.set_status(api_key, act_id, 8)
     await call.message.edit_text("Activation cancelled. Credits refunded to balance.")
-
-# --- Admin Country Add & Remove ---
-@dp.callback_query(F.data == "admin_add_country")
-async def start_add_country(call: types.CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Back", callback_data="admin_back")
-    await call.message.edit_text(
-        "Enter Country ID (e.g. Russia=0, Brazil=7, USA=187):",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
-    await state.set_state(Form.admin_add_country_id)
-    await call.answer()
-
-@dp.message(Form.admin_add_country_id)
-async def process_cid(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Please enter a numeric ID:")
-        return
-    await state.update_data(cid=int(message.text))
-    await message.answer("Enter Country Name (e.g. Brazil, USA):", parse_mode="HTML")
-    await state.set_state(Form.admin_add_country_name)
-
-@dp.message(Form.admin_add_country_name)
-async def process_cname(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    cid = data["cid"]
-    cname = message.text.strip()
-    await add_country(cid, cname)
-    await state.clear()
-    await message.answer(
-        f"Country Added: <b>{cname}</b> (ID: {cid})",
-        reply_markup=get_main_reply_keyboard(True),
-        parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data == "admin_rem_country")
-async def list_remove_country(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    countries = await get_all_countries()
-    builder = InlineKeyboardBuilder()
-    for cid, name in countries:
-        builder.button(text=f"Delete {name}", callback_data=f"del_c_{cid}")
-    builder.button(text="Back", callback_data="admin_back")
-    builder.adjust(2)
-    await call.message.edit_text("Select country to delete:", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("del_c_"))
-async def execute_remove_country(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    cid = int(call.data.split("_")[2])
-    await remove_country(cid)
-    await call.answer("Country deleted.", show_alert=True)
-    await call.message.delete()
 
 # --- Main Entrypoint ---
 async def main():
