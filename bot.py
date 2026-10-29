@@ -11,12 +11,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
-# --- Config ---
+# --- Configuration ---
 BOT_TOKEN = "9026120942:AAFwZJ_q-fBM2g_KjTykECNkKmPA0eI6F2c"
 ADMIN_ID = 7266067201
 DB_PATH = "bot_database.db"
 
-# EMOJI BADGES
+# --- Emoji Icons ---
 EMOJI = {
     "key": "🔑",
     "tg": "✈️",
@@ -28,7 +28,7 @@ EMOJI = {
     "admin": "👑",
 }
 
-# --- Render Port Binding Web Server ---
+# --- Dummy Web Server (Render Port Binding) ---
 async def handle_ping(request):
     return web.Response(text="Bot is running live 24/7 on Render!")
 
@@ -98,7 +98,7 @@ class TigerSMS:
             except Exception:
                 return None
 
-# --- Database ---
+# --- Database Layer ---
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -141,7 +141,7 @@ async def remove_country(country_id: int):
         await db.execute("DELETE FROM countries WHERE country_id = ?", (country_id,))
         await db.commit()
 
-# --- COLORFUL MAIN KEYBOARD (Image Styled) ---
+# --- Colorful Reply Keyboard (Real Green, Blue, Red Buttons) ---
 def get_main_reply_keyboard(is_admin: bool = False):
     builder = ReplyKeyboardBuilder()
     
@@ -150,19 +150,19 @@ def get_main_reply_keyboard(is_admin: bool = False):
         types.KeyboardButton(text="⚡ Buy Numbers", style="success"),
         types.KeyboardButton(text="💰 Balance", style="primary")
     )
-    # Row 2: Blue (Primary) & Red (Danger)
+    # Row 2: Blue (Primary) & Green (Success)
     builder.add(
         types.KeyboardButton(text="🔄 Change API Key", style="primary"),
-        types.KeyboardButton(text="Profile", style="success")
+        types.KeyboardButton(text="👤 Profile", style="success")
     )
     if is_admin:
         builder.add(
-            types.KeyboardButton(text="👑 Admin Panel", style="danger")
+            types.KeyboardButton(text="👑 Admin Console", style="danger")
         )
     builder.adjust(2, 2, 1 if is_admin else 0)
     return builder.as_markup(resize_keyboard=True)
 
-# --- Dispatcher & Bot ---
+# --- Dispatcher Setup ---
 dp = Dispatcher(storage=MemoryStorage())
 bot = Bot(token=BOT_TOKEN)
 
@@ -175,24 +175,24 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
     if user_id == ADMIN_ID and not countries:
         text = (
-            f"{EMOJI['admin']} <b>Owner Dashboard</b>\n\n"
-            f"{EMOJI['danger']} <b>Status:</b> [🔴 NO COUNTRIES ADDED]\n\n"
-            "Database e kono country nai! /admin likhe country add koro."
+            f"{EMOJI['admin']} <b>Welcome Owner!</b>\n\n"
+            f"{EMOJI['danger']} <b>Status:</b> No countries added to database yet.\n"
+            "Please type /admin or click <b>👑 Admin Console</b> below to add countries."
         )
         await message.answer(text, reply_markup=get_main_reply_keyboard(True), parse_mode="HTML")
         return
 
     if not api_key:
         text = (
-            f"{EMOJI['key']} <b>Tiger SMS Telegram Bot</b>\n\n"
-            f"{EMOJI['danger']} <b>Status:</b> [🔴 API KEY MISSING]\n\n"
-            "Bot ti use korte niche theke <b>🔄 Change API Key</b> button e chap diye API Key set koro!"
+            f"{EMOJI['key']} <b>Welcome to Tiger SMS Bot!</b>\n\n"
+            f"{EMOJI['danger']} <b>Status:</b> API Key Missing\n\n"
+            "Please click <b>🔄 Change API Key</b> below to set your Tiger SMS API Key."
         )
     else:
         text = (
-            f"{EMOJI['tg']} <b>Tiger SMS Telegram Hub</b>\n\n"
-            f"{EMOJI['success']} <b>Status:</b> [🟢 SYSTEM READY]\n\n"
-            "Nicher colorful menu theke option select koro:"
+            f"{EMOJI['tg']} <b>Tiger SMS Telegram Service</b>\n\n"
+            f"{EMOJI['success']} <b>Status:</b> System Ready & Connected\n\n"
+            "Select an action from the menu below:"
         )
 
     await message.answer(
@@ -201,38 +201,38 @@ async def cmd_start(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-# --- /admin Command & Button ---
+# --- /admin Command & Menu ---
 @dp.message(Command("admin"))
-@dp.message(F.text == "👑 Admin Panel")
+@dp.message(F.text == "👑 Admin Console")
 async def cmd_admin(message: types.Message, state: FSMContext):
     await state.clear()
     if message.from_user.id != ADMIN_ID:
         return
     countries = await get_all_countries()
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Add Country [🟢 SUCCESS]", callback_data="admin_add_country")
+    builder.button(text="➕ Add New Country", callback_data="admin_add_country")
     if countries:
-        builder.button(text="➖ Remove Country [🔴 DANGER]", callback_data="admin_rem_country")
-    builder.button(text="🏠 Close Panel [🔵 PRIMARY]", callback_data="admin_close")
+        builder.button(text="➖ Remove Country", callback_data="admin_rem_country")
+    builder.button(text="❌ Close Console", callback_data="admin_close")
     builder.adjust(1)
 
     text = (
-        f"{EMOJI['admin']} <b>Admin Tool Console</b>\n\n"
-        f"{EMOJI['primary']} <b>Status:</b> [🔵 ADMIN ACTIVE]\n"
-        f"Available Countries: <code>{len(countries)}</code>"
+        f"{EMOJI['admin']} <b>Admin Control Console</b>\n\n"
+        f"{EMOJI['primary']} <b>Status:</b> Admin Mode Active\n"
+        f"🌐 <b>Configured Countries:</b> <code>{len(countries)}</code>"
     )
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_close")
 async def close_admin(call: types.CallbackQuery):
     await call.message.delete()
-    await call.message.answer(f"{EMOJI['success']} Admin tool closed successfully!")
+    await call.message.answer(f"{EMOJI['success']} Admin console closed.")
 
-# --- API Key Change / Set ---
+# --- API Key Configuration ---
 @dp.message(F.text == "🔄 Change API Key")
 async def ask_api_key_msg(message: types.Message, state: FSMContext):
     await message.answer(
-        f"{EMOJI['key']} Tomar <b>Tiger SMS API Key</b> ekhane paste kore send koro:",
+        f"{EMOJI['key']} Please send your <b>Tiger SMS API Key</b> here:",
         parse_mode="HTML"
     )
     await state.set_state(Form.waiting_for_api_key)
@@ -244,8 +244,8 @@ async def save_api_key(message: types.Message, state: FSMContext):
     
     if balance is None:
         await message.answer(
-            f"{EMOJI['danger']} <b>Invalid API Key! [🔴 FAILED]</b>\n"
-            "Balance verify kora jayni. Sothik key dao:",
+            f"{EMOJI['danger']} <b>Authentication Failed!</b>\n"
+            "Could not verify your API key with Tiger SMS. Please send a valid key:",
             parse_mode="HTML"
         )
         return
@@ -253,8 +253,8 @@ async def save_api_key(message: types.Message, state: FSMContext):
     await set_user_key(message.from_user.id, key)
     await state.clear()
     await message.answer(
-        f"{EMOJI['success']} <b>API Key Saved! [🟢 SUCCESS]</b>\n\n"
-        f"{EMOJI['money']} <b>Balance:</b> <code>${balance}</code>",
+        f"{EMOJI['success']} <b>API Key Saved Successfully!</b>\n\n"
+        f"{EMOJI['money']} <b>Current Balance:</b> <code>${balance}</code>",
         reply_markup=get_main_reply_keyboard(message.from_user.id == ADMIN_ID),
         parse_mode="HTML"
     )
@@ -264,98 +264,95 @@ async def save_api_key(message: types.Message, state: FSMContext):
 async def view_balance_msg(message: types.Message):
     api_key = await get_user_key(message.from_user.id)
     if not api_key:
-        await message.answer(f"{EMOJI['danger']} Age <b>🔄 Change API Key</b> e click kore key set koro!")
+        await message.answer(f"{EMOJI['danger']} Please set your API key first using <b>🔄 Change API Key</b>.")
         return
 
     balance = await TigerSMS.get_balance(api_key)
     text = (
         f"{EMOJI['money']} <b>Account Overview</b>\n\n"
-        f"{EMOJI['primary']} <b>Status:</b> [🔵 CONNECTED]\n"
-        f"💵 <b>Current Balance:</b> <code>${balance}</code>"
+        f"{EMOJI['primary']} <b>Provider:</b> Tiger SMS\n"
+        f"💵 <b>Available Balance:</b> <code>${balance}</code>"
     )
     await message.answer(text, parse_mode="HTML")
 
 # --- Profile ---
-@dp.message(F.text == "Profile")
+@dp.message(F.text == "👤 Profile")
 async def view_profile_msg(message: types.Message):
     api_key = await get_user_key(message.from_user.id)
-    status_badge = f"{EMOJI['success']} [🟢 ACTIVE]" if api_key else f"{EMOJI['danger']} [🔴 NOT SET]"
+    status_badge = f"{EMOJI['success']} Connected" if api_key else f"{EMOJI['danger']} Not Connected"
     text = (
-        f"👤 <b>User Profile</b>\n\n"
+        f"👤 <b>User Profile Details</b>\n\n"
         f"🆔 <b>Telegram ID:</b> <code>{message.from_user.id}</code>\n"
         f"🔑 <b>API Status:</b> {status_badge}\n"
-        f"👑 <b>Role:</b> {'Owner/Admin' if message.from_user.id == ADMIN_ID else 'User'}"
+        f"👑 <b>Role:</b> {'Administrator' if message.from_user.id == ADMIN_ID else 'Standard User'}"
     )
     await message.answer(text, parse_mode="HTML")
 
-# --- Buy Numbers: Step 1 (Country Selection) ---
+# --- Step 1: Select Country ---
 @dp.message(F.text == "⚡ Buy Numbers")
 async def show_countries_msg(message: types.Message):
     api_key = await get_user_key(message.from_user.id)
     if not api_key:
-        await message.answer(f"{EMOJI['danger']} Age API Key set koro!")
+        await message.answer(f"{EMOJI['danger']} Please set your API key first.")
         return
 
     countries = await get_all_countries()
     if not countries:
-        await message.answer(f"{EMOJI['danger']} Kono country add kora nai! Admin ke add korte bolo.")
+        await message.answer(f"{EMOJI['danger']} No countries available. Ask Admin to configure countries.")
         return
 
     builder = InlineKeyboardBuilder()
     for cid, name in countries:
-        builder.button(text=f"🌐 {name} [🟢]", callback_data=f"sel_c_{cid}_{name}")
+        builder.button(text=f"🌐 {name}", callback_data=f"sel_c_{cid}_{name}")
     builder.adjust(2)
 
     await message.answer(
-        f"{EMOJI['tg']} <b>Country select koro:</b>",
+        f"{EMOJI['tg']} <b>Select Country for Telegram Activation:</b>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
 
-# --- Buy Numbers: Step 2 (Amount / Quantity Input) ---
+# --- Step 2: Choose Quantity ---
 @dp.callback_query(F.data.startswith("sel_c_"))
 async def ask_quantity(call: types.CallbackQuery, state: FSMContext):
     _, _, cid, cname = call.data.split("_")
     await state.update_data(selected_cid=int(cid), selected_cname=cname)
     
-    # Quantity options inline buttons
     builder = InlineKeyboardBuilder()
-    builder.button(text="1 টি [🟢]", callback_data="qty_1")
-    builder.button(text="2 টি [🔵]", callback_data="qty_2")
-    builder.button(text="5 টি [🔵]", callback_data="qty_5")
-    builder.button(text="10 টি [🔴]", callback_data="qty_10")
+    builder.button(text="1 Number", callback_data="qty_1")
+    builder.button(text="2 Numbers", callback_data="qty_2")
+    builder.button(text="5 Numbers", callback_data="qty_5")
+    builder.button(text="10 Numbers", callback_data="qty_10")
     builder.adjust(2, 2)
 
     await call.message.edit_text(
-        f"{EMOJI['primary']} <b>Country:</b> {cname} (ID: {cid})\n\n"
-        f"👉 <b>Kotogula number buy korte chao?</b>\n"
-        "Nicher button chapo othoba custom number likhe reply dao (e.g. 1, 3, 5):",
+        f"{EMOJI['primary']} <b>Selected Country:</b> {cname} (ID: {cid})\n\n"
+        f"👉 <b>How many numbers do you want to purchase?</b>\n"
+        "Click a button below or type a custom number (e.g. 1, 3, 5):",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
     await state.set_state(Form.waiting_for_amount)
     await call.answer()
 
-# Quantity button handler
 @dp.callback_query(Form.waiting_for_amount, F.data.startswith("qty_"))
 async def process_qty_button(call: types.CallbackQuery, state: FSMContext):
     amount = int(call.data.split("_")[1])
     await execute_bulk_buy(call.message, call.from_user.id, state, amount)
     await call.answer()
 
-# Quantity text input handler
 @dp.message(Form.waiting_for_amount)
 async def process_qty_text(message: types.Message, state: FSMContext):
     if not message.text.isdigit() or int(message.text) <= 0:
-        await message.answer(f"{EMOJI['danger']} Sothik songkha dao (e.g. 1, 2, 5):")
+        await message.answer(f"{EMOJI['danger']} Please provide a valid number (e.g. 1, 2, 5):")
         return
     amount = int(message.text)
     if amount > 10:
-        await message.answer(f"{EMOJI['danger']} Ekbare maximum 10-ti number buy kora jabe!")
+        await message.answer(f"{EMOJI['danger']} Maximum 10 numbers allowed per order!")
         return
     await execute_bulk_buy(message, message.from_user.id, state, amount)
 
-# --- Buy Numbers: Step 3 (Execution & Multi-Tracking) ---
+# --- Step 3: Purchase & Multi-Tracking ---
 async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMContext, amount: int):
     data = await state.get_data()
     cid = data["selected_cid"]
@@ -364,12 +361,12 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
 
     api_key = await get_user_key(user_id)
     status_msg = await message.answer(
-        f"{EMOJI['pending']} <b>{amount} টি নম্বর খোঁজা হচ্ছে ({cname})... [🔵 PROCESSING]</b>",
+        f"{EMOJI['pending']} <b>Processing order for {amount}x number(s) ({cname})...</b>",
         parse_mode="HTML"
     )
 
     purchased = []
-    for i in range(amount):
+    for _ in range(amount):
         success, res = await TigerSMS.buy_number(api_key, cid)
         if success:
             purchased.append(res)
@@ -377,27 +374,26 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
 
     if not purchased:
         builder = InlineKeyboardBuilder()
-        builder.button(text="🔄 Try Again [🔴 DANGER]", callback_data="buy_menu_retry")
+        builder.button(text="🔄 Try Again", callback_data="buy_menu_retry")
         await status_msg.edit_text(
-            f"{EMOJI['danger']} <b>Kono number pawa jayni! [🔴 OUT OF STOCK]</b>",
+            f"{EMOJI['danger']} <b>Purchase Failed: Out of stock or insufficient balance.</b>",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
         return
 
     await status_msg.edit_text(
-        f"{EMOJI['success']} <b>{len(purchased)} টি নম্বর কেনা হয়েছে! [🟢 SUCCESS]</b>\n"
-        "Niche shobgula number er OTP live refresh hocche...",
+        f"{EMOJI['success']} <b>Successfully allocated {len(purchased)} number(s)!</b>\n"
+        "Tracking SMS codes live below...",
         parse_mode="HTML"
     )
 
-    # Protiti number er jonne alada background task
     for item in purchased:
         act_id = item["activationId"]
         phone = item["phoneNumber"]
         cost = item.get("activationCost", "N/A")
         sub_msg = await message.answer(
-            f"{EMOJI['pending']} <b>Waiting for SMS... [⏳ PENDING]</b>\n\n"
+            f"{EMOJI['pending']} <b>Waiting for SMS Code...</b>\n\n"
             f"📞 <b>Phone:</b> <code>+{phone}</code>\n"
             f"🌐 <b>Country:</b> {cname}\n"
             f"💰 <b>Cost:</b> ${cost}",
@@ -411,30 +407,30 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
         status_data = await TigerSMS.get_status(api_key, act_id)
         
         builder = InlineKeyboardBuilder()
-        builder.button(text="❌ Cancel & Refund [🔴 DANGER]", callback_data=f"cancel_act_{act_id}")
+        builder.button(text="❌ Cancel & Refund", callback_data=f"cancel_act_{act_id}")
 
         if status_data and status_data.get("sms"):
             code = status_data["sms"][0]["code"]
-            await TigerSMS.set_status(api_key, act_id, 6) # Finished
+            await TigerSMS.set_status(api_key, act_id, 6)
             await msg.edit_text(
-                f"{EMOJI['success']} <b>OTP DELIVERED! [🟢 SUCCESS]</b>\n\n"
+                f"{EMOJI['success']} <b>OTP DELIVERED!</b>\n\n"
                 f"📞 <b>Phone:</b> <code>+{phone}</code>\n"
                 f"💬 <b>OTP Code:</b> <code>{code}</code>\n"
                 f"🏷 <b>Country:</b> {country_name}\n"
                 f"💰 <b>Cost:</b> ${cost}\n\n"
-                f"<i>Code ti copy kore Telegram e boshaw!</i>",
+                f"<i>Submit this code in your Telegram client.</i>",
                 parse_mode="HTML"
             )
             return
 
         try:
             await msg.edit_text(
-                f"{EMOJI['pending']} <b>WAITING FOR SMS... [⏳ PENDING]</b>\n\n"
+                f"{EMOJI['pending']} <b>WAITING FOR SMS...</b>\n\n"
                 f"📞 <b>Phone:</b> <code>+{phone}</code>\n"
                 f"🌐 <b>Country:</b> {country_name}\n"
                 f"🆔 <b>Activation ID:</b> <code>{act_id}</code>\n"
                 f"💰 <b>Cost:</b> ${cost}\n\n"
-                "<i>SMS pathano hole auto update hobe...</i>",
+                "<i>Auto-refreshing status every few seconds...</i>",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML"
             )
@@ -443,8 +439,8 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
 
     await TigerSMS.set_status(api_key, act_id, 8)
     await msg.edit_text(
-        f"{EMOJI['danger']} <b>TIMEOUT! [🔴 EXPIRED]</b>\n"
-        f"Phone: <code>+{phone}</code> er kono code na ashay refund kora hoyeche.",
+        f"{EMOJI['danger']} <b>ACTIVATION TIMEOUT!</b>\n"
+        f"Phone: <code>+{phone}</code> was cancelled and refunded.",
         parse_mode="HTML"
     )
 
@@ -454,27 +450,27 @@ async def cancel_activation(call: types.CallbackQuery):
     api_key = await get_user_key(call.from_user.id)
     await TigerSMS.set_status(api_key, act_id, 8)
     await call.message.edit_text(
-        f"{EMOJI['danger']} <b>Number Cancelled! [🔴 CANCELLED]</b>\n"
-        "Balance Tiger SMS account e refund hoyeche.",
+        f"{EMOJI['danger']} <b>Activation Cancelled!</b>\n"
+        "Credits refunded to your Tiger SMS balance.",
         parse_mode="HTML"
     )
 
-# --- Admin Country Add/Remove ---
+# --- Admin Country Management ---
 @dp.callback_query(F.data == "admin_add_country")
 async def start_add_country(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         return
-    await call.message.answer("Tiger SMS <b>Country ID</b> lekho (e.g. Russia=0, Brazil=7, USA=187):", parse_mode="HTML")
+    await call.message.answer("Enter Tiger SMS <b>Country ID</b> (e.g. Russia=0, Brazil=7, USA=187):", parse_mode="HTML")
     await state.set_state(Form.admin_add_country_id)
     await call.answer()
 
 @dp.message(Form.admin_add_country_id)
 async def process_cid(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("Please number e Country ID dao:")
+        await message.answer("Please enter a valid numeric Country ID:")
         return
     await state.update_data(cid=int(message.text))
-    await message.answer("Desher <b>Name</b> lekho (e.g. Brazil, USA):", parse_mode="HTML")
+    await message.answer("Enter the Country <b>Name</b> (e.g. Brazil, USA):", parse_mode="HTML")
     await state.set_state(Form.admin_add_country_name)
 
 @dp.message(Form.admin_add_country_name)
@@ -485,7 +481,7 @@ async def process_cname(message: types.Message, state: FSMContext):
     await add_country(cid, cname)
     await state.clear()
     await message.answer(
-        f"{EMOJI['success']} <b>[🟢 ADDED]</b> {cname} (ID: {cid}) success!",
+        f"{EMOJI['success']} <b>Country Added!</b>\n{cname} (ID: {cid})",
         reply_markup=get_main_reply_keyboard(True),
         parse_mode="HTML"
     )
@@ -497,9 +493,9 @@ async def list_remove_country(call: types.CallbackQuery):
     countries = await get_all_countries()
     builder = InlineKeyboardBuilder()
     for cid, name in countries:
-        builder.button(text=f"🗑 {name} [🔴]", callback_data=f"del_c_{cid}")
+        builder.button(text=f"🗑 {name}", callback_data=f"del_c_{cid}")
     builder.adjust(2)
-    await call.message.edit_text("Remove korte country select koro:", reply_markup=builder.as_markup())
+    await call.message.edit_text("Select country to remove:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("del_c_"))
 async def execute_remove_country(call: types.CallbackQuery):
@@ -507,7 +503,7 @@ async def execute_remove_country(call: types.CallbackQuery):
         return
     cid = int(call.data.split("_")[2])
     await remove_country(cid)
-    await call.answer("Country deleted!", show_alert=True)
+    await call.answer("Country deleted successfully!", show_alert=True)
     await call.message.delete()
 
 # --- Main Entrypoint ---
