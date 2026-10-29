@@ -17,12 +17,13 @@ BOT_TOKEN = "9026120942:AAFwZJ_q-fBM2g_KjTykECNkKmPA0eI6F2c"
 ADMIN_ID = 7266067201
 DB_PATH = "bot_database.db"
 
+# Fixed: Brazil Telegram (+55)
 FIXED_COUNTRY_ID = 7
 FIXED_SERVICE = "tg"
 
-# --- Web Server for Render ---
+# --- Render 24/7 Web Server ---
 async def handle_ping(request):
-    return web.Response(text="Tiger SMS Bot running live 24/7.")
+    return web.Response(text="Tiger SMS Bot is running live 24/7.")
 
 def create_web_app():
     app = web.Application()
@@ -34,10 +35,9 @@ def create_web_app():
 class Form(StatesGroup):
     waiting_for_api_key = State()
     waiting_for_amount = State()
-    admin_set_max_price = State()
     admin_set_bad_prefix = State()
 
-# --- Tiger SMS API Integration (Web-Matched Logic) ---
+# --- Tiger SMS API (Pure Lowest Rate Buy Engine) ---
 class TigerSMS:
     BASE_URL = "https://api.tiger-sms.com/stubs/handler_api.php"
 
@@ -53,51 +53,49 @@ class TigerSMS:
                 return None
 
     @staticmethod
-    async def buy_number(api_key: str, max_price: float = None):
-        # Web-er moto direct standard handler use kora hoyeche
+    async def buy_number(api_key: str):
+        # Kono maxPrice parameter nai -> API auto lowest price-e number nibe
         params = {
             "action": "getNumber",
-            "api_key": api_key,
+            "api_key": api_key.strip(),
             "service": FIXED_SERVICE,
             "country": str(FIXED_COUNTRY_ID)
         }
-        
-        # Max price set thakle string 4 decimal pathabe
-        if max_price is not None and max_price > 0:
-            params["maxPrice"] = f"{float(max_price):.4f}"
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(TigerSMS.BASE_URL, params=params, timeout=15) as resp:
                     raw_text = (await resp.text()).strip()
-                    
-                    # 1. Tiger SMS Standard Plain-Text Match: ACCESS_NUMBER:$id:$number
-                    if raw_text.startswith("ACCESS_NUMBER"):
+
+                    # 1. Standard Success Response: ACCESS_NUMBER:$id:$number
+                    if "ACCESS_NUMBER" in raw_text:
                         parts = raw_text.split(":")
                         return True, {
                             "activationId": parts[1],
-                            "phoneNumber": parts[2],
-                            "activationCost": "Allocated"
+                            "phoneNumber": parts[2]
                         }
 
-                    # 2. JSON Format Check
+                    # 2. JSON check (jodi kono error JSON hishebe ashe)
                     try:
                         import json
                         data = json.loads(raw_text)
                         if "activationId" in data:
-                            return True, data
+                            return True, {
+                                "activationId": str(data["activationId"]),
+                                "phoneNumber": str(data["phoneNumber"])
+                            }
                         err_msg = data.get("details") or data.get("message") or data.get("title") or str(data)
                         return False, err_msg
                     except Exception:
                         pass
 
-                    # 3. Known error string codes
+                    # 3. Plain text error checks
                     if raw_text == "NO_NUMBERS":
-                        return False, "No numbers available. Try removing max price limit or wait 2-3 mins."
+                        return False, "Stock temporary empty. Please try again in 1-2 minutes."
                     elif raw_text == "NO_BALANCE":
-                        return False, "Insufficient balance on Tiger SMS."
-                    elif raw_text == "WRONG_MAX_PRICE":
-                        return False, "Current market price is higher than your set Max Price limit."
+                        return False, "Insufficient balance in your Tiger SMS account."
+                    elif raw_text == "BAD_KEY":
+                        return False, "Invalid API Key. Please re-enter your key."
 
                     return False, raw_text
             except Exception as e:
@@ -105,7 +103,7 @@ class TigerSMS:
 
     @staticmethod
     async def get_status(api_key: str, activation_id: str):
-        params = {"action": "getStatusV2", "api_key": api_key, "id": activation_id}
+        params = {"action": "getStatusV2", "api_key": api_key.strip(), "id": str(activation_id)}
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(TigerSMS.BASE_URL, params=params, timeout=8) as resp:
@@ -115,7 +113,7 @@ class TigerSMS:
 
     @staticmethod
     async def set_status(api_key: str, activation_id: str, status: int):
-        params = {"action": "setStatusV2", "api_key": api_key, "id": activation_id, "status": status}
+        params = {"action": "setStatusV2", "api_key": api_key.strip(), "id": str(activation_id), "status": status}
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(TigerSMS.BASE_URL, params=params, timeout=8) as resp:
@@ -123,7 +121,7 @@ class TigerSMS:
             except Exception:
                 return None
 
-# --- Database Management ---
+# --- Database ---
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -180,7 +178,7 @@ def get_main_reply_keyboard(is_admin: bool = False):
     builder.adjust(2, 2, 1 if is_admin else 0)
     return builder.as_markup(resize_keyboard=True)
 
-# --- Bot Initialization ---
+# --- Dispatcher & Bot ---
 dp = Dispatcher(storage=MemoryStorage())
 bot = Bot(token=BOT_TOKEN)
 
@@ -202,8 +200,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
             text = (
                 "<b>Tiger SMS Telegram Terminal</b>\n\n"
                 "Service: <b>Brazil Telegram (+55)</b>\n"
-                "Status: System Active & Ready\n"
-                "Click <b>Buy Numbers</b> below to purchase."
+                "Mode: <b>Lowest Rate Auto-Capture</b>\n"
+                "Status: System Ready\n\n"
+                "Click <b>Buy Numbers</b> to purchase."
             )
 
         await message.answer(
@@ -221,19 +220,17 @@ async def cmd_admin(message: types.Message, state: FSMContext):
         return
 
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
-        max_p = await get_setting("max_price", "None")
         bad_pref = await get_setting("bad_prefix", "None")
 
         builder = InlineKeyboardBuilder()
-        builder.button(text="Set Max Price Limit", callback_data="admin_set_max_p")
         builder.button(text="Set Blocked Prefixes", callback_data="admin_set_bad_p")
         builder.button(text="Close Console", callback_data="admin_close")
         builder.adjust(1)
 
         text = (
             "<b>Admin Configuration Center</b>\n\n"
-            "Active Service: <b>Brazil Telegram</b>\n"
-            f"Max Price Cap: <code>${max_p}</code>\n"
+            "Active Country: <b>Brazil (ID: 7)</b>\n"
+            "Service: <b>Telegram (tg)</b>\n"
             f"Blocked Prefixes: <code>{bad_pref}</code>"
         )
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -243,35 +240,12 @@ async def close_admin(call: types.CallbackQuery):
     await call.message.delete()
     await call.message.answer("Returned to main terminal.")
 
-@dp.callback_query(F.data == "admin_set_max_p")
-async def set_max_p_prompt(call: types.CallbackQuery, state: FSMContext):
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Back", callback_data="admin_back")
-    await call.message.edit_text(
-        "Enter maximum price limit in USD (e.g. <code>0.38</code>) or send <code>0</code> to disable guard:",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
-    await state.set_state(Form.admin_set_max_price)
-    await call.answer()
-
-@dp.message(Form.admin_set_max_price)
-async def process_max_price(message: types.Message, state: FSMContext):
-    val = message.text.strip()
-    try:
-        f_val = float(val)
-        await set_setting("max_price", str(f_val) if f_val > 0 else "0")
-        await state.clear()
-        await message.answer(f"Price limit set to: <b>${f_val}</b>", parse_mode="HTML")
-    except ValueError:
-        await message.answer("Please provide a valid numeric value:")
-
 @dp.callback_query(F.data == "admin_set_bad_p")
 async def set_bad_p_prompt(call: types.CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.button(text="Back", callback_data="admin_back")
     await call.message.edit_text(
-        "Enter comma-separated prefixes to auto-refund (e.g. <code>5511, 5521</code>) or send <code>clear</code> to reset:",
+        "Enter comma-separated prefixes to auto-refund (e.g. <code>5511, 5521</code>) or send <code>clear</code> to disable:",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -283,7 +257,7 @@ async def process_bad_prefix(message: types.Message, state: FSMContext):
     val = message.text.strip().replace(" ", "")
     if val.lower() == "clear":
         await set_setting("bad_prefix", "None")
-        await message.answer("Blocked prefix registry cleared.")
+        await message.answer("Blocked prefix list cleared.")
     else:
         await set_setting("bad_prefix", val)
         await message.answer(f"Blocked prefixes updated: <code>{val}</code>", parse_mode="HTML")
@@ -292,25 +266,23 @@ async def process_bad_prefix(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_back")
 async def admin_back_btn(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    max_p = await get_setting("max_price", "None")
     bad_pref = await get_setting("bad_prefix", "None")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="Set Max Price Limit", callback_data="admin_set_max_p")
     builder.button(text="Set Blocked Prefixes", callback_data="admin_set_bad_p")
     builder.button(text="Close Console", callback_data="admin_close")
     builder.adjust(1)
 
     await call.message.edit_text(
         "<b>Admin Configuration Center</b>\n\n"
-        "Active Service: <b>Brazil Telegram</b>\n"
-        f"Max Price Cap: <code>${max_p}</code>\n"
+        "Active Country: <b>Brazil (ID: 7)</b>\n"
+        "Service: <b>Telegram (tg)</b>\n"
         f"Blocked Prefixes: <code>{bad_pref}</code>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
 
-# --- API Key Setup ---
+# --- API Key Management ---
 @dp.message(F.text == "Change API Key")
 async def ask_api_key_msg(message: types.Message, state: FSMContext):
     await message.answer("Send your Tiger SMS API Key below:", parse_mode="HTML")
@@ -334,7 +306,7 @@ async def save_api_key(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
 
-# --- Account Inquiries ---
+# --- Balance & Profile ---
 @dp.message(F.text == "Balance")
 async def view_balance_msg(message: types.Message):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
@@ -359,7 +331,7 @@ async def view_profile_msg(message: types.Message):
         )
         await message.answer(text, parse_mode="HTML")
 
-# --- Direct Buy Flow ---
+# --- Direct Buy Flow: Brazil Telegram (+55) ---
 @dp.message(F.text == "Buy Numbers")
 async def direct_ask_quantity(message: types.Message, state: FSMContext):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
@@ -377,8 +349,9 @@ async def direct_ask_quantity(message: types.Message, state: FSMContext):
         builder.adjust(2, 2, 1)
 
         await message.answer(
-            "Service: <b>Brazil Telegram (+55)</b>\n\n"
-            "Select quantity to purchase or send custom number (1-10):",
+            "Service: <b>Brazil Telegram (+55)</b>\n"
+            "Pricing: <b>Lowest Rate Auto-Selected</b>\n\n"
+            "Select quantity or send custom count (1-10):",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
@@ -406,25 +379,22 @@ async def process_qty_txt(message: types.Message, state: FSMContext):
         return
     await execute_bulk_buy(message, message.from_user.id, state, amount)
 
-# --- Bulk Buy Execution ---
+# --- Order Execution Engine ---
 async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMContext, amount: int):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         await state.clear()
-
         api_key = await get_user_key(user_id)
-        max_p_str = await get_setting("max_price", "0")
-        max_price = float(max_p_str) if max_p_str not in ("0", "", "None") else None
 
         bad_p_str = await get_setting("bad_prefix", "None")
         bad_prefixes = [p.strip() for p in bad_p_str.split(",") if p.strip()] if bad_pref_active(bad_p_str) else []
 
-        status_msg = await message.answer(f"Processing order for {amount}x Brazil Telegram number(s)...", parse_mode="HTML")
+        status_msg = await message.answer(f"Connecting to Tiger SMS at lowest rate for {amount}x number(s)...", parse_mode="HTML")
 
         purchased = []
         last_error = ""
 
         for _ in range(amount):
-            success, res = await TigerSMS.buy_number(api_key, max_price)
+            success, res = await TigerSMS.buy_number(api_key)
             if success:
                 phone = str(res.get("phoneNumber", ""))
                 act_id = str(res.get("activationId", ""))
@@ -432,15 +402,17 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
                 # Check Prefix Blacklist
                 is_bad = any(phone.startswith(bad_p.lstrip("+")) for bad_p in bad_prefixes)
                 if is_bad:
+                    # Cancel bad prefix instantly
                     await TigerSMS.set_status(api_key, act_id, 8)
-                    retry_success, retry_res = await TigerSMS.buy_number(api_key, max_price)
+                    # Retry allocation once
+                    retry_success, retry_res = await TigerSMS.buy_number(api_key)
                     if retry_success:
                         purchased.append(retry_res)
                 else:
                     purchased.append(res)
             else:
                 last_error = str(res)
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.2)
 
         if not purchased:
             await status_msg.edit_text(f"Purchase Failed: <code>{last_error or 'Out of stock'}</code>", parse_mode="HTML")
@@ -454,12 +426,11 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
         for item in purchased:
             act_id = item["activationId"]
             phone = item["phoneNumber"]
-            cost = item.get("activationCost", "Auto")
 
             sub_msg = await message.answer(
                 f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: Brazil\n"
+                f"Country: Brazil (+55)\n"
                 f"Status: Active",
                 parse_mode="HTML"
             )
@@ -488,7 +459,7 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
                 f"<b>SMS Code Received</b>\n\n"
                 f"Phone: <code>+{phone}</code>\n"
                 f"Code: <code>{code}</code>\n"
-                f"Country: Brazil",
+                f"Country: Brazil (+55)",
                 reply_markup=multi_btn.as_markup(),
                 parse_mode="HTML"
             )
@@ -498,7 +469,7 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
             await msg.edit_text(
                 f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: Brazil\n"
+                f"Country: Brazil (+55)\n"
                 f"ID: <code>{act_id}</code>\n\n"
                 "Auto-refreshing status...",
                 reply_markup=builder.as_markup(),
