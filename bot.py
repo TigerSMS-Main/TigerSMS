@@ -17,13 +17,13 @@ BOT_TOKEN = "9026120942:AAFwZJ_q-fBM2g_KjTykECNkKmPA0eI6F2c"
 ADMIN_ID = 7266067201
 DB_PATH = "bot_database.db"
 
-# Tiger SMS Official Brazil ID is 19
-FIXED_COUNTRY_ID = 19
+# Brazil Country ID set to 73
+FIXED_COUNTRY_ID = 73
 FIXED_SERVICE = "tg"
 
 # --- Render 24/7 Hosting Web Server ---
 async def handle_ping(request):
-    return web.Response(text="Tiger SMS Bot running live 24/7.")
+    return web.Response(text="Bot is running live 24/7.")
 
 def create_web_app():
     app = web.Application()
@@ -37,7 +37,7 @@ class Form(StatesGroup):
     waiting_for_amount = State()
     admin_set_bad_prefix = State()
 
-# --- Tiger SMS API (Postman Collection Aligned) ---
+# --- Tiger SMS API ---
 class TigerSMS:
     BASE_URL = "https://api.tiger-sms.com/stubs/handler_api.php"
 
@@ -54,7 +54,6 @@ class TigerSMS:
 
     @staticmethod
     async def buy_number(api_key: str):
-        # Postman V1 getNumber format: GET /stubs/handler_api.php?action=getNumber&api_key={{api_key}}&service=tg&country=19
         params = {
             "action": "getNumber",
             "api_key": api_key.strip(),
@@ -67,7 +66,6 @@ class TigerSMS:
                 async with session.get(TigerSMS.BASE_URL, params=params, timeout=15) as resp:
                     raw_text = (await resp.text()).strip()
 
-                    # Success: ACCESS_NUMBER:$id:$number
                     if raw_text.startswith("ACCESS_NUMBER"):
                         parts = raw_text.split(":")
                         return True, {
@@ -75,17 +73,12 @@ class TigerSMS:
                             "phoneNumber": parts[2]
                         }
 
-                    # Error translation based on Postman collection
                     if raw_text == "NO_NUMBERS":
-                        return False, "NO_NUMBERS: Out of stock temporarily."
+                        return False, "Stock temporary empty. Try again in 1-2 minutes."
                     elif raw_text == "NO_BALANCE":
-                        return False, "NO_BALANCE: Insufficient funds."
+                        return False, "Insufficient balance."
                     elif raw_text == "BAD_KEY":
-                        return False, "BAD_KEY: Invalid API key."
-                    elif raw_text == "BAD_SERVICE":
-                        return False, "BAD_SERVICE: Invalid service."
-                    elif raw_text == "BAD_COUNTRY":
-                        return False, "BAD_COUNTRY: Invalid country code."
+                        return False, "Invalid API key."
 
                     return False, raw_text
             except Exception as e:
@@ -93,7 +86,6 @@ class TigerSMS:
 
     @staticmethod
     async def get_status(api_key: str, activation_id: str):
-        # Postman getStatusV2 format
         params = {"action": "getStatusV2", "api_key": api_key.strip(), "id": str(activation_id)}
         async with aiohttp.ClientSession() as session:
             try:
@@ -104,7 +96,6 @@ class TigerSMS:
 
     @staticmethod
     async def set_status(api_key: str, activation_id: str, status: int):
-        # Postman setStatus format
         params = {"action": "setStatus", "api_key": api_key.strip(), "id": str(activation_id), "status": str(status)}
         async with aiohttp.ClientSession() as session:
             try:
@@ -152,7 +143,7 @@ async def set_setting(key: str, value: str):
         await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
 
-# --- Main Navigation Keyboard ---
+# --- Main Buttons Layout ---
 def get_main_reply_keyboard(is_admin: bool = False):
     builder = ReplyKeyboardBuilder()
     builder.add(
@@ -183,17 +174,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
         if not api_key:
             text = (
-                "<b>Welcome to Tiger SMS Service</b>\n\n"
-                "Target: <b>Brazil Telegram (+55)</b>\n"
+                "<b>Welcome</b>\n\n"
                 "Status: No API Key linked.\n"
-                "Click <b>Change API Key</b> below to connect your account."
+                "Nicher <b>Change API Key</b> e click kore key add korun."
             )
         else:
             text = (
-                "<b>Tiger SMS Telegram Terminal</b>\n\n"
-                "Target: <b>Brazil Telegram (+55)</b>\n"
-                "Status: Ready to buy\n\n"
-                "Click <b>Buy Numbers</b> to purchase."
+                "<b>Telegram Numbers Hub</b>\n\n"
+                "Status: System Ready\n"
+                "Nicher <b>Buy Numbers</b> e click korun."
             )
 
         await message.answer(
@@ -202,7 +191,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
 
-# --- Admin Panel (/admin) ---
+# --- Admin Console ---
 @dp.message(Command("admin"))
 @dp.message(F.text == "Admin Console")
 async def cmd_admin(message: types.Message, state: FSMContext):
@@ -219,9 +208,7 @@ async def cmd_admin(message: types.Message, state: FSMContext):
         builder.adjust(1)
 
         text = (
-            "<b>Admin Configuration Center</b>\n\n"
-            "Active Country: <b>Brazil (Official ID: 19)</b>\n"
-            "Service: <b>Telegram (tg)</b>\n"
+            "<b>Admin Console</b>\n\n"
             f"Blocked Prefixes: <code>{bad_pref}</code>"
         )
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -229,7 +216,6 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_close")
 async def close_admin(call: types.CallbackQuery):
     await call.message.delete()
-    await call.message.answer("Returned to main terminal.")
 
 @dp.callback_query(F.data == "admin_set_bad_p")
 async def set_bad_p_prompt(call: types.CallbackQuery, state: FSMContext):
@@ -265,18 +251,15 @@ async def admin_back_btn(call: types.CallbackQuery, state: FSMContext):
     builder.adjust(1)
 
     await call.message.edit_text(
-        "<b>Admin Configuration Center</b>\n\n"
-        "Active Country: <b>Brazil (Official ID: 19)</b>\n"
-        "Service: <b>Telegram (tg)</b>\n"
-        f"Blocked Prefixes: <code>{bad_pref}</code>",
+        f"<b>Admin Console</b>\n\nBlocked Prefixes: <code>{bad_pref}</code>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
 
-# --- API Key Management ---
+# --- API Key Setup ---
 @dp.message(F.text == "Change API Key")
 async def ask_api_key_msg(message: types.Message, state: FSMContext):
-    await message.answer("Send your Tiger SMS API Key below:", parse_mode="HTML")
+    await message.answer("Tiger SMS API Key ekhane send korun:", parse_mode="HTML")
     await state.set_state(Form.waiting_for_api_key)
 
 @dp.message(Form.waiting_for_api_key)
@@ -303,11 +286,11 @@ async def view_balance_msg(message: types.Message):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         api_key = await get_user_key(message.from_user.id)
         if not api_key:
-            await message.answer("Please configure your API Key first.")
+            await message.answer("Age API Key configure korun.")
             return
 
         balance = await TigerSMS.get_balance(api_key)
-        await message.answer(f"Tiger SMS Balance: <code>${balance}</code>", parse_mode="HTML")
+        await message.answer(f"Balance: <code>${balance}</code>", parse_mode="HTML")
 
 @dp.message(F.text == "Profile")
 async def view_profile_msg(message: types.Message):
@@ -315,20 +298,19 @@ async def view_profile_msg(message: types.Message):
         api_key = await get_user_key(message.from_user.id)
         status_text = "Connected" if api_key else "Not Configured"
         text = (
-            "<b>Account Details</b>\n\n"
-            f"User ID: <code>{message.from_user.id}</code>\n"
-            f"API Status: {status_text}\n"
-            f"Role: {'Administrator' if message.from_user.id == ADMIN_ID else 'Standard User'}"
+            "<b>Profile Details</b>\n\n"
+            f"ID: <code>{message.from_user.id}</code>\n"
+            f"Status: {status_text}"
         )
         await message.answer(text, parse_mode="HTML")
 
-# --- Direct Buy Flow ---
+# --- Buy Flow ---
 @dp.message(F.text == "Buy Numbers")
 async def direct_ask_quantity(message: types.Message, state: FSMContext):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         api_key = await get_user_key(message.from_user.id)
         if not api_key:
-            await message.answer("Please configure your API Key first.")
+            await message.answer("Age API Key configure korun.")
             return
 
         builder = InlineKeyboardBuilder()
@@ -340,8 +322,7 @@ async def direct_ask_quantity(message: types.Message, state: FSMContext):
         builder.adjust(2, 2, 1)
 
         await message.answer(
-            "Service: <b>Brazil Telegram (+55)</b>\n\n"
-            "Select quantity or send custom count (1-10):",
+            "Kotogula number buy korte chan select korun othoba quantity likhe pathan (1-10):",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
@@ -361,15 +342,15 @@ async def process_qty_btn(call: types.CallbackQuery, state: FSMContext):
 @dp.message(Form.waiting_for_amount)
 async def process_qty_txt(message: types.Message, state: FSMContext):
     if not message.text.isdigit() or int(message.text) <= 0:
-        await message.answer("Please specify a valid numeric amount (1 to 10):")
+        await message.answer("Please valid number amount pathan (1 to 10):")
         return
     amount = int(message.text)
     if amount > 10:
-        await message.answer("Maximum limit is 10 numbers per batch.")
+        await message.answer("Maximum limit holo 10 per batch.")
         return
     await execute_bulk_buy(message, message.from_user.id, state, amount)
 
-# --- Order Execution Engine ---
+# --- Buy Execution & SMS Loop ---
 async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMContext, amount: int):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         await state.clear()
@@ -378,7 +359,7 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
         bad_p_str = await get_setting("bad_prefix", "None")
         bad_prefixes = [p.strip() for p in bad_p_str.split(",") if p.strip()] if bad_pref_active(bad_p_str) else []
 
-        status_msg = await message.answer(f"Connecting to Tiger SMS for {amount}x Brazil number(s)...", parse_mode="HTML")
+        status_msg = await message.answer(f"Allocating {amount}x number(s)...", parse_mode="HTML")
 
         purchased = []
         last_error = ""
@@ -392,9 +373,7 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
                 # Check Prefix Blacklist
                 is_bad = any(phone.startswith(bad_p.lstrip("+")) for bad_p in bad_prefixes)
                 if is_bad:
-                    # Tiger SMS enforces 120s wait before status=8 (EARLY_CANCEL_DENIED)
                     asyncio.create_task(delayed_refund(api_key, act_id))
-                    # Retry once immediately
                     retry_success, retry_res = await TigerSMS.buy_number(api_key)
                     if retry_success:
                         purchased.append(retry_res)
@@ -402,32 +381,32 @@ async def execute_bulk_buy(message: types.Message, user_id: int, state: FSMConte
                     purchased.append(res)
             else:
                 last_error = str(res)
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.2)
 
         if not purchased:
             await status_msg.edit_text(f"Purchase Failed:\n<code>{last_error}</code>", parse_mode="HTML")
             return
 
-        await status_msg.edit_text(
-            f"Successfully allocated {len(purchased)} Brazil Telegram number(s).\n"
-            "SMS codes will be tracked below (20 min window):"
-        )
+        await status_msg.edit_text(f"Allocated {len(purchased)} number(s).")
 
         for item in purchased:
             act_id = item["activationId"]
             phone = item["phoneNumber"]
 
+            builder = InlineKeyboardBuilder()
+            builder.button(text="🔄 Check / Refresh", callback_data=f"ref_act_{act_id}_{phone}")
+            builder.button(text="Cancel & Refund", callback_data=f"cancel_act_{act_id}")
+            builder.adjust(1)
+
             sub_msg = await message.answer(
-                f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: Brazil (+55)\n"
-                f"Status: Active",
+                "Status: Waiting for SMS...",
+                reply_markup=builder.as_markup(),
                 parse_mode="HTML"
             )
             asyncio.create_task(poll_sms_loop(sub_msg, api_key, act_id, phone))
 
 async def delayed_refund(api_key: str, act_id: str):
-    # Wait out the 120s early cancel restriction
     await asyncio.sleep(125)
     await TigerSMS.set_status(api_key, act_id, 8)
 
@@ -435,13 +414,9 @@ def bad_pref_active(s: str) -> bool:
     return s not in ("None", "", "clear", "none")
 
 async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: str):
-    # 20 minutes window: 240 polls * 5 sec = 1200 sec
     for _ in range(240):
         await asyncio.sleep(5)
         status_data = await TigerSMS.get_status(api_key, act_id)
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text="Cancel & Refund", callback_data=f"cancel_act_{act_id}")
 
         if status_data and status_data.get("sms"):
             code = status_data["sms"]["code"]
@@ -451,31 +426,55 @@ async def poll_sms_loop(msg: types.Message, api_key: str, act_id: str, phone: st
             multi_btn.adjust(1)
 
             await msg.edit_text(
-                f"<b>SMS Code Received</b>\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Code: <code>{code}</code>\n"
-                f"Country: Brazil (+55)",
+                f"OTP Code: <code>{code}</code>",
                 reply_markup=multi_btn.as_markup(),
                 parse_mode="HTML"
             )
             return
 
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 Check / Refresh", callback_data=f"ref_act_{act_id}_{phone}")
+        builder.button(text="Cancel & Refund", callback_data=f"cancel_act_{act_id}")
+        builder.adjust(1)
+
         try:
             await msg.edit_text(
-                f"Waiting for SMS\n\n"
                 f"Phone: <code>+{phone}</code>\n"
-                f"Country: Brazil (+55)\n"
-                f"ID: <code>{act_id}</code>\n\n"
-                "Auto-refreshing status...",
+                "Status: Waiting for SMS...",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML"
             )
         except Exception:
             pass
 
-    # 20 minute auto-cancel and refund
     await TigerSMS.set_status(api_key, act_id, 8)
-    await msg.edit_text(f"Activation Expired. Phone +{phone} was auto-refunded to balance.")
+    await msg.edit_text(f"Phone: <code>+{phone}</code> expired and refunded.", parse_mode="HTML")
+
+# --- Manual Refresh Handler ---
+@dp.callback_query(F.data.startswith("ref_act_"))
+async def manual_refresh_sms(call: types.CallbackQuery):
+    _, _, act_id, phone = call.data.split("_")
+    api_key = await get_user_key(call.from_user.id)
+    
+    status_data = await TigerSMS.get_status(api_key, act_id)
+
+    if status_data and status_data.get("sms"):
+        code = status_data["sms"]["code"]
+        multi_btn = InlineKeyboardBuilder()
+        multi_btn.button(text="Request Another SMS", callback_data=f"retry_act_{act_id}")
+        multi_btn.button(text="Complete Activation", callback_data=f"finish_act_{act_id}")
+        multi_btn.adjust(1)
+
+        await call.message.edit_text(
+            f"Phone: <code>+{phone}</code>\n"
+            f"OTP Code: <code>{code}</code>",
+            reply_markup=multi_btn.as_markup(),
+            parse_mode="HTML"
+        )
+        await call.answer("OTP code received!")
+    else:
+        await call.answer("SMS ekhono asheni, opekkha korun...", show_alert=False)
 
 @dp.callback_query(F.data.startswith("retry_act_"))
 async def retry_sms(call: types.CallbackQuery):
@@ -498,9 +497,9 @@ async def cancel_activation(call: types.CallbackQuery):
     api_key = await get_user_key(call.from_user.id)
     res = await TigerSMS.set_status(api_key, act_id, 8)
     if res == "EARLY_CANCEL_DENIED":
-        await call.answer("Early cancel denied! Must wait 2 minutes after purchase.", show_alert=True)
+        await call.answer("Early cancel denied! 2 minutes wait korte hobe.", show_alert=True)
     else:
-        await call.message.edit_text("Activation cancelled. Credits refunded to balance.")
+        await call.message.edit_text("Cancelled and refunded.")
 
 # --- Main Entrypoint ---
 async def main():
@@ -513,11 +512,11 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"Render web server running on port {port}")
+    logging.info(f"Render server running on port {port}")
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        logging.info("Telegram Bot Polling started...")
+        logging.info("Polling started...")
         await dp.start_polling(bot)
     except Exception as e:
         logging.error(f"Bot error: {e}", exc_info=True)
